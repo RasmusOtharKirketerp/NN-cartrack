@@ -1,3 +1,5 @@
+# nn.py
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -6,20 +8,15 @@ import random
 import numpy as np
 from collections import deque
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 import matplotlib.patches as patches
+import config  # Import configuration file
 
-# Check if CUDA is available and set the device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Simple Car Track Environment with High Maneuverability
+# Car Track Environment with High Maneuverability and Multiple Obstacles
 class CarTrackEnv:
     def __init__(self):
-        self.scale_factor = 1
-        self.track_length = 500  # Extended length of the track
-        self.track_width = 50     # Extended width of the track
-        self.obstacle_center = np.array([self.track_length / 2, self.track_width / 2], dtype=np.float32)
-        self.obstacle_size = np.array([50.0, 10.0], dtype=np.float32)  # Wider obstacle
+        self.track_length = config.TRACK_LENGTH
+        self.track_width = config.TRACK_WIDTH
+        self.obstacles = config.OBSTACLES
         self.reset()
 
     def reset(self):
@@ -36,96 +33,146 @@ class CarTrackEnv:
     def _get_state(self):
         distance_to_left_border = self.position[1]
         distance_to_right_border = self.track_width - self.position[1]
-        state = np.concatenate((self.position, self.velocity, [distance_to_left_border, distance_to_right_border]))
-        return torch.tensor(state, dtype=torch.float32).to(device)
+
+        # Calculate distances to each obstacle
+        obstacle_distances = []
+        for obstacle in self.obstacles:
+            obstacle_x_min = obstacle["center"][0] - obstacle["size"][0] / 2
+            obstacle_x_max = obstacle["center"][0] + obstacle["size"][0] / 2
+            obstacle_y_min = obstacle["center"][1] - obstacle["size"][1] / 2
+            obstacle_y_max = obstacle["center"][1] + obstacle["size"][1] / 2
+
+            distance_x = max(0, obstacle_x_min - self.position[0], self.position[0] - obstacle_x_max)
+            distance_y = max(0, obstacle_y_min - self.position[1], self.position[1] - obstacle_y_max)
+            obstacle_distances.extend([distance_x, distance_y])
+
+        state = np.concatenate((self.position, self.velocity, [distance_to_left_border, distance_to_right_border], obstacle_distances))
+        return torch.tensor(state, dtype=torch.float32).to(config.DEVICE)
 
     def step(self, action):
         if self.done:
             return self._get_state(), 0, self.done
 
-        acceleration = 0.1
-        steering = 0.1
-        max_speed = 1.0
-
-        if action == 0:  # Accelerate
-            self.velocity[0] += acceleration
-        elif action == 1:  # Decelerate
-            self.velocity[0] -= acceleration
-        elif action == 2:  # Steer left
-            self.velocity[1] -= steering
-        elif action == 3:  # Steer right
-            self.velocity[1] += steering
-
-        self.velocity *= 0.95
-
-        speed = np.linalg.norm(self.velocity)
-        if speed > max_speed:
-            self.velocity = (self.velocity / speed) * max_speed
-
-        self.position += self.velocity
-        self.position_history.append(self.position.copy())
-        self.speed_history.append(speed)
+        self._update_velocity(action)
+        self._apply_friction_and_cap_speed()
+        self._update_position()
 
         delta_x = self.position[0] - self.prev_position_x
-        self.timestep += 1
+        self.timestep += 1  # Increment timestep
 
-        off_track = (
+        # Check if off-track or reached goal
+        off_track = self._check_if_off_track()
+        reached_goal = self.position[0] >= self.track_length
+
+        # Calculate reward and penalties
+        reward = self._calculate_reward(delta_x, reached_goal, off_track)
+
+        # Update previous x-position
+        self.prev_position_x = self.position[0]
+
+        return self._get_state(), reward, self.done
+
+    def _update_velocity(self, action):
+        if action == 0:  # Accelerate
+            self.velocity[0] += config.ACCELERATION
+        elif action == 1:  # Decelerate
+            self.velocity[0] -= config.ACCELERATION
+        elif action == 2:  # Steer left
+            self.velocity[1] -= config.STEERING
+        elif action == 3:  # Steer right
+            self.velocity[1] += config.STEERING
+
+    def _apply_friction_and_cap_speed(self):
+        # Apply friction
+        self.velocity *= 0.95
+
+        # Cap the speed at max_speed
+        speed = np.linalg.norm(self.velocity)
+        if speed > config.MAX_SPEED:
+            self.velocity = (self.velocity / speed) * config.MAX_SPEED
+
+    def _update_position(self):
+        # Update the car's position based on velocity
+        self.position += self.velocity
+        self.position_history.append(self.position.copy())
+        self.speed_history.append(np.linalg.norm(self.velocity))
+
+    def _check_if_off_track(self):
+        return (
             self.position[0] < 0 or
             self.position[0] > self.track_length or
             self.position[1] < 0 or
             self.position[1] > self.track_width
         )
 
-        reached_goal = self.position[0] >= self.track_length
+    def _calculate_reward(self, delta_x, reached_goal, off_track):
+        border_penalty = self._calculate_border_penalty()
+        obstacle_penalty = self._calculate_obstacle_penalty()
 
-        obstacle_x_min = self.obstacle_center[0] - self.obstacle_size[0] / 2
-        obstacle_x_max = self.obstacle_center[0] + self.obstacle_size[0] / 2
-        obstacle_y_min = self.obstacle_center[1] - self.obstacle_size[1] / 2
-        obstacle_y_max = self.obstacle_center[1] + self.obstacle_size[1] / 2
+        if reached_goal:
+            reward = config.REWARD_GOAL  # Reward for reaching the goal
+            self.done = True
+            self.reached_goal = True
+        elif off_track:
+            reward = config.PENALTY_OFF_TRACK  # Penalty for going off-track
+            self.done = True
+        elif self.timestep >= config.MAX_TIMESTEPS:  # End the episode if max timesteps reached
+            reward = config.PENALTY_TIME_LIMIT  # Penalty for running out of time
+            self.done = True
+        else:
+            # In _calculate_reward method
+            reward = delta_x * FORWARD_REWARD_MULTIPLIER - TIME_PENALTY + border_penalty + obstacle_penalty 
 
-        in_obstacle = (
-            obstacle_x_min <= self.position[0] <= obstacle_x_max and
-            obstacle_y_min <= self.position[1] <= obstacle_y_max
-        )
+        return reward
 
+    def _calculate_border_penalty(self):
         distance_to_left_border = self.position[1]
         distance_to_right_border = self.track_width - self.position[1]
         min_distance_to_border = min(distance_to_left_border, distance_to_right_border)
 
-        border_threshold = 1.0
-        if min_distance_to_border < border_threshold:
-            border_penalty = - (border_threshold - min_distance_to_border) * 50
-        else:
-            border_penalty = 0
+        if min_distance_to_border < config.BORDER_THRESHOLD:
+            return - (config.BORDER_THRESHOLD - min_distance_to_border) * config.PENALTY_BORDER
+        return 0
 
-        if reached_goal:
-            reward = 1000
-            self.done = True
-            self.reached_goal = True
-        elif off_track or in_obstacle:
-            reward = -1000
-            self.done = True
-        else:
-            reward = delta_x * 10 - 1 + border_penalty
+    def _calculate_obstacle_penalty(self):
+        obstacle_penalty = 0
+        for obstacle in self.obstacles:
+            obstacle_x_min = obstacle["center"][0] - obstacle["size"][0] / 2
+            obstacle_x_max = obstacle["center"][0] + obstacle["size"][0] / 2
+            obstacle_y_min = obstacle["center"][1] - obstacle["size"][1] / 2
+            obstacle_y_max = obstacle["center"][1] + obstacle["size"][1] / 2
 
-        self.prev_position_x = self.position[0]
+            in_obstacle = (
+                obstacle_x_min <= self.position[0] <= obstacle_x_max and
+                obstacle_y_min <= self.position[1] <= obstacle_y_max
+            )
 
-        return self._get_state(), reward, self.done
+            if in_obstacle:
+                obstacle_penalty = config.PENALTY_OBSTACLE
+                self.done = True
+                break
+            else:
+                distance_x = max(0, obstacle_x_min - self.position[0], self.position[0] - obstacle_x_max)
+                distance_y = max(0, obstacle_y_min - self.position[1], self.position[1] - obstacle_y_max)
+                min_distance_to_obstacle = min(distance_x, distance_y)
 
-# Neural Network for DQN
+                if min_distance_to_obstacle < config.OBSTACLE_THRESHOLD:
+                    obstacle_penalty -= (config.OBSTACLE_THRESHOLD - min_distance_to_obstacle) * 50
+
+        return obstacle_penalty
+
 class DQN(nn.Module):
     def __init__(self, state_size, action_size):
         super(DQN, self).__init__()
-        self.fc1 = nn.Linear(state_size, 128)
-        self.fc2 = nn.Linear(128, 256)
-        self.fc3 = nn.Linear(256, action_size)
+        self.fc1 = nn.Linear(state_size, config.FC1_UNITS)
+        self.fc2 = nn.Linear(config.FC1_UNITS, config.FC2_UNITS)
+        self.fc3 = nn.Linear(config.FC2_UNITS, action_size)
 
     def forward(self, state):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
-# Replay Memory for Experience Replay
 class ReplayMemory:
     def __init__(self, capacity):
         self.memory = deque(maxlen=capacity)
@@ -140,104 +187,31 @@ class ReplayMemory:
     def __len__(self):
         return len(self.memory)
 
-# Hyperparameters
-BATCH_SIZE = 64
-GAMMA = 0.99
-EPS_START = 1.0
-EPS_END = 0.1
-EPS_DECAY = 2000
-TARGET_UPDATE = 10
-MEMORY_CAPACITY = 20000
-NUM_EPISODES = 500
-LEARNING_RATE = 1e-4
-
-action_size = 5
-state_size = 6
-
-env = CarTrackEnv()
-
-policy_net = DQN(state_size, action_size).to(device)
-target_net = DQN(state_size, action_size).to(device)
-target_net.load_state_dict(policy_net.state_dict())
-target_net.eval()
-
-optimizer = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
-memory = ReplayMemory(MEMORY_CAPACITY)
-
-steps_done = 0
-epsilon = EPS_START
-
-plt.ion()
-fig, ax = plt.subplots(figsize=(15, 8))
-ax.set_xlim(0, env.track_length + 50)
-ax.set_ylim(-10, env.track_width + 10)
-ax.set_xlabel('Position X')
-ax.set_ylabel('Position Y')
-ax.set_title('Car Trajectory Across Episodes')
-
-ax.axhline(y=0, color='red', linestyle='--', label='Track Boundary')
-ax.axhline(y=env.track_width, color='red', linestyle='--')
-ax.axvline(x=env.track_length, color='green', linestyle='--', label='Finish Line')
-
-ax.fill_between([0, env.track_length], 0, env.track_width, color='lightgrey', alpha=0.5, label='Track Area')
-
-obstacle_x_min = env.obstacle_center[0] - env.obstacle_size[0] / 2
-obstacle_y_min = env.obstacle_center[1] - env.obstacle_size[1] / 2
-obstacle_rect = patches.Rectangle(
-    (obstacle_x_min, obstacle_y_min),
-    env.obstacle_size[0],
-    env.obstacle_size[1],
-    linewidth=1,
-    edgecolor='black',
-    facecolor='brown',
-    label='Obstacle'
-)
-ax.add_patch(obstacle_rect)
-
-ax.legend(loc='upper right')
-
-all_positions = []
-all_speeds = []
-all_rewards = []
-all_episodes = []
-line_collections = []
-best_reward = float('-inf')
-best_episode = None
-best_positions = None
-best_line = None
-successful_episodes_positions = []
-successful_lines = []
-
-def select_action(state):
-    global steps_done, epsilon
-    epsilon = EPS_END + (EPS_START - EPS_END) * np.exp(-1. * steps_done / EPS_DECAY)
-    steps_done += 1
+def select_action(state, epsilon, policy_net):
     if random.random() < epsilon:
-        return torch.tensor([[random.randrange(action_size)]], device=device, dtype=torch.long)
+        return torch.tensor([[random.randrange(config.ACTION_SIZE)]], device=config.DEVICE, dtype=torch.long)
     else:
         with torch.no_grad():
             return policy_net(state).max(0)[1].view(1, 1)
 
-def optimize_model():
-    if len(memory) < BATCH_SIZE:
+def optimize_model(memory, policy_net, target_net, optimizer):
+    if len(memory) < config.BATCH_SIZE:
         return
-    transitions = memory.sample(BATCH_SIZE)
+    transitions = memory.sample(config.BATCH_SIZE)
 
     state_batch, action_batch, reward_batch, next_state_batch, done_batch = transitions
 
-    state_batch = torch.stack(state_batch).to(device)
-    action_batch = torch.cat(action_batch).to(device)
-    reward_batch = torch.tensor(reward_batch, device=device, dtype=torch.float32)
-    next_state_batch = torch.stack(next_state_batch).to(device)
-    done_batch = torch.tensor(done_batch, device=device, dtype=torch.bool)
+    state_batch = torch.stack(state_batch).to(config.DEVICE)
+    action_batch = torch.cat(action_batch).to(config.DEVICE)
+    reward_batch = torch.tensor(reward_batch, device=config.DEVICE, dtype=torch.float32)
+    next_state_batch = torch.stack(next_state_batch).to(config.DEVICE)
+    done_batch = torch.tensor(done_batch, device=config.DEVICE, dtype=torch.bool)
 
     state_action_values = policy_net(state_batch).gather(1, action_batch)
 
     with torch.no_grad():
-        next_state_actions = policy_net(next_state_batch).max(1)[1].unsqueeze(1)
-        next_state_values = target_net(next_state_batch).gather(1, next_state_actions).squeeze()
-
-    expected_state_action_values = reward_batch + (GAMMA * next_state_values * (~done_batch))
+        next_state_values = target_net(next_state_batch).max(1)[0]
+    expected_state_action_values = reward_batch + (config.GAMMA * next_state_values * (~done_batch))
 
     criterion = nn.SmoothL1Loss()
     loss = criterion(state_action_values.squeeze(), expected_state_action_values)
@@ -247,73 +221,145 @@ def optimize_model():
     torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 1)
     optimizer.step()
 
-for episode in range(NUM_EPISODES):
-    state = env.reset()
-    total_reward = 0
+def update_plot(trajectories, x_positions_current, y_positions_current, total_reward_current, ax):
+    # 'trajectories' is a list of tuples: (x_positions, y_positions, total_reward)
 
-    for t in range(1000):
-        state = state.to(device)
-        action = select_action(state)
-        next_state, reward, done = env.step(action.item())
-        total_reward += reward
+    # Clear previous trajectories and texts
+    # Remove all lines
+    #for line in ax.lines[:]:
+    #    line.remove()
+    # Remove all texts
+    #for text in ax.texts[:]:
+    #    text.remove()
 
-        reward_tensor = torch.tensor([reward], device=device)
-        done_tensor = torch.tensor([done], device=device, dtype=torch.bool)
+    # Plot the top 10 trajectories
+    for x_positions, y_positions, total_reward in trajectories:
+        ax.plot(x_positions, y_positions, color='blue', linewidth=0.5)
+        # Add score at the end of each trajectory
+        ax.text(x_positions[-1], y_positions[-1], f"{total_reward:.1f}", fontsize=8)
 
-        memory.push(state, action, reward_tensor, next_state, done_tensor)
+    # Plot the current trajectory in a different color
+    ax.plot(x_positions_current, y_positions_current, color='red', linewidth=1.0)
+    ax.text(x_positions_current[-1], y_positions_current[-1], f"{total_reward_current:.1f}", fontsize=10, color='red')
 
-        state = next_state
+    plt.draw()
+    plt.pause(0.001)
 
-        optimize_model()
 
-        if done:
-            break
 
-    positions = np.array(env.position_history)
-    speeds = np.array(env.speed_history)
+def train(env, policy_net, target_net, optimizer, memory, ax):
+    epsilon = config.EPS_START  # Initialize epsilon
+    epsilon_decay = (config.EPS_START - config.EPS_END) / config.EPS_DECAY
+    trajectories = []
 
-    all_positions.append(positions)
-    all_speeds.append(speeds)
-    all_rewards.append(total_reward)
-    all_episodes.append(episode)
+    for episode in range(config.NUM_EPISODES):
+        state = env.reset()
+        total_reward = 0
 
-    if env.reached_goal:
-        if total_reward > best_reward:
-            if best_line:
-                best_line.set_color('blue')
-                successful_lines.append(best_line)
-            best_reward = total_reward
-            best_episode = episode
-            best_positions = positions
-            best_line, = ax.plot(best_positions[:,0], best_positions[:,1], color='red', linewidth=3, label='Best Episode')
-        else:
-            line, = ax.plot(positions[:,0], positions[:,1], color='blue', linewidth=2)
-            successful_lines.append(line)
-            successful_episodes_positions.append(positions)
+        for t in range(config.MAX_TIMESTEPS):
+            state = state.to(config.DEVICE)
+            action = select_action(state, epsilon, policy_net)
+            next_state, reward, done = env.step(action.item())
+            total_reward += reward
 
-    print(f"Episode {episode + 1}: Total Reward = {total_reward}")
+            reward_tensor = torch.tensor([reward], device=config.DEVICE)
+            done_tensor = torch.tensor([done], device=config.DEVICE, dtype=torch.bool)
 
-    if len(line_collections) >= 10:
-        old_lc = line_collections.pop(0)
-        old_lc.remove()
+            memory.push(state, action, reward_tensor, next_state, done_tensor)
 
-    points = positions.reshape(-1,1,2)
-    segments = np.concatenate([points[:-1], points[1:]], axis=1)
-    norm = plt.Normalize(0, 1)
-    lc = LineCollection(segments, cmap='viridis', norm=norm)
-    lc.set_array(speeds[:-1])
-    lc.set_linewidth(2)
-    line_collections.append(ax.add_collection(lc))
+            state = next_state
 
-    fig.canvas.draw()
-    fig.canvas.flush_events()
+            optimize_model(memory, policy_net, target_net, optimizer)
 
-    if episode % TARGET_UPDATE == 0:
-        target_net.load_state_dict(policy_net.state_dict())
+            if done:
+                break
 
-print("Training complete.")
+        # Update epsilon
+        if epsilon > config.EPS_END:
+            epsilon -= epsilon_decay
 
-plt.ioff()
-plt.show()
+        # Update the target network
+        if episode % config.TARGET_UPDATE == 0:
+            target_net.load_state_dict(policy_net.state_dict())
 
-torch.save(policy_net.state_dict(), 'car_track_model.pth')
+        print(f"Episode {episode + 1}: Total Reward = {total_reward}")
+
+        # Get current trajectory positions
+        x_positions_current = [pos[0] for pos in env.position_history]
+        y_positions_current = [pos[1] for pos in env.position_history]
+
+        # Store the trajectory
+        trajectories.append((x_positions_current, y_positions_current, total_reward))
+
+        # Keep only the top 10 trajectories
+        trajectories = sorted(trajectories, key=lambda x: x[2], reverse=True)[:10]
+
+        # Update the plot
+        update_plot(trajectories, x_positions_current, y_positions_current, total_reward, ax)
+
+
+
+def setup_environment():
+    env = CarTrackEnv()
+    return env
+
+def setup_model():
+    policy_net = DQN(config.STATE_SIZE, config.ACTION_SIZE).to(config.DEVICE)
+    target_net = DQN(config.STATE_SIZE, config.ACTION_SIZE).to(config.DEVICE)
+    target_net.load_state_dict(policy_net.state_dict())
+    target_net.eval()
+
+    optimizer = optim.Adam(policy_net.parameters(), lr=config.LEARNING_RATE)
+    memory = ReplayMemory(config.MEMORY_CAPACITY)
+
+    return policy_net, target_net, optimizer, memory
+
+def setup_visualization(env):
+    plt.ion()
+    fig, ax = plt.subplots(figsize=(15, 8))
+    ax.set_xlim(0, env.track_length + 50)
+    ax.set_ylim(-10, env.track_width + 10)
+    ax.set_xlabel('Position X')
+    ax.set_ylabel('Position Y')
+    ax.set_title('Car Trajectory Across Episodes')
+
+    ax.axhline(y=0, color='red', linestyle='--', label='Track Boundary')
+    ax.axhline(y=env.track_width, color='red', linestyle='--')
+    ax.axvline(x=env.track_length, color='green', linestyle='--', label='Finish Line')
+
+    ax.fill_between([0, env.track_length], 0, env.track_width, color='lightgrey', alpha=0.5, label='Track Area')
+
+    # Draw obstacles
+    for obstacle in env.obstacles:
+        obstacle_x_min = obstacle["center"][0] - obstacle["size"][0] / 2
+        obstacle_y_min = obstacle["center"][1] - obstacle["size"][1] / 2
+        obstacle_rect = patches.Rectangle(
+            (obstacle_x_min, obstacle_y_min),
+            obstacle["size"][0],
+            obstacle["size"][1],
+            linewidth=1,
+            edgecolor='black',
+            facecolor='brown',
+            label='Obstacle'
+        )
+        ax.add_patch(obstacle_rect)
+
+    ax.legend(loc='upper right')
+
+    return fig, ax
+
+def main():
+    env = setup_environment()
+    policy_net, target_net, optimizer, memory = setup_model()
+    fig, ax = setup_visualization(env)
+
+    train(env, policy_net, target_net, optimizer, memory, ax)
+
+    # Ensure the plot is displayed at the end
+    plt.ioff()  # Turn off interactive mode
+    plt.show()  # Show the plot
+
+    torch.save(policy_net.state_dict(), 'car_track_model.pth')
+
+if __name__ == "__main__":
+    main()
