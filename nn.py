@@ -1,5 +1,5 @@
 # nn.py
-
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,9 +7,11 @@ import torch.nn.functional as F
 import random
 import numpy as np
 from collections import deque
+from datetime import datetime
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import config  # Import configuration file
+from tqdm import tqdm
 
 # Car Track Environment with High Maneuverability and Multiple Obstacles
 class CarTrackEnv:
@@ -53,24 +55,46 @@ class CarTrackEnv:
         if self.done:
             return self._get_state(), 0, self.done
 
+        # Update velocity and position based on action
         self._update_velocity(action)
         self._apply_friction_and_cap_speed()
         self._update_position()
 
+        # Calculate forward progress in the x-direction
         delta_x = self.position[0] - self.prev_position_x
+        delta_x_reward = max(delta_x * config.DELTA_X_REWARD_FACTOR, 0)  # Reward for forward progress, only positive values
+
         self.timestep += 1  # Increment timestep
 
-        # Check if off-track or reached goal
+        # Check if the agent is off-track or has reached the goal
         off_track = self._check_if_off_track()
         reached_goal = self.position[0] >= self.track_length
 
-        # Calculate reward and penalties
-        reward = self._calculate_reward(delta_x, reached_goal, off_track)
+        # Calculate penalties based on conditions
+        border_penalty = self._calculate_border_penalty()
+        obstacle_penalty = self._calculate_obstacle_penalty()
+        
+        # Set reward based on conditions
+        if reached_goal:
+            reward = config.REWARD_GOAL  # Reward for reaching the goal
+            self.done = True
+            self.reached_goal = True
+        elif off_track:
+            reward = config.PENALTY_OFF_TRACK  # Penalty for going off-track
+            self.done = True
+        elif self.timestep >= config.MAX_TIMESTEPS:  # End episode if max timesteps reached
+            reward = config.PENALTY_TIME_LIMIT  # Penalty for running out of time
+            self.done = True
+        else:
+            # Regular reward calculation including delta_x_reward, time penalty, and other penalties
+            reward = delta_x_reward - config.TIME_PENALTY + border_penalty + obstacle_penalty
 
-        # Update previous x-position
+        # Update previous x-position for the next step calculation
         self.prev_position_x = self.position[0]
 
         return self._get_state(), reward, self.done
+
+
 
     def _update_velocity(self, action):
         if action == 0:  # Accelerate
@@ -116,23 +140,34 @@ class CarTrackEnv:
         elif off_track:
             reward = config.PENALTY_OFF_TRACK  # Penalty for going off-track
             self.done = True
-        elif self.timestep >= config.MAX_TIMESTEPS:  # End the episode if max timesteps reached
+        elif self.timestep >= config.MAX_TIMESTEPS:
             reward = config.PENALTY_TIME_LIMIT  # Penalty for running out of time
             self.done = True
         else:
-            # In _calculate_reward method
-            reward = delta_x * FORWARD_REWARD_MULTIPLIER - TIME_PENALTY + border_penalty + obstacle_penalty 
+            # Forward progress reward based on delta_x
+            delta_x_reward = delta_x * config.DELTA_X_REWARD_FACTOR
+            reward = delta_x_reward - config.TIME_PENALTY + border_penalty + obstacle_penalty
 
         return reward
 
+
     def _calculate_border_penalty(self):
+        # Calculate left and right boundary penalties
         distance_to_left_border = self.position[1]
         distance_to_right_border = self.track_width - self.position[1]
         min_distance_to_border = min(distance_to_left_border, distance_to_right_border)
 
+        # Penalize for proximity to left/right borders if too close
+        border_penalty = 0
         if min_distance_to_border < config.BORDER_THRESHOLD:
-            return - (config.BORDER_THRESHOLD - min_distance_to_border) * config.PENALTY_BORDER
-        return 0
+            border_penalty -= (config.BORDER_THRESHOLD - min_distance_to_border) * config.PENALTY_BORDER
+
+        # Check for backward movement from start
+        if self.position[0] < self.prev_position_x:  # Going backward in x-direction
+            border_penalty -= config.PENALTY_BACKWARDS  # Apply backward penalty
+
+        return border_penalty
+
 
     def _calculate_obstacle_penalty(self):
         obstacle_penalty = 0
@@ -162,16 +197,29 @@ class CarTrackEnv:
         return obstacle_penalty
 
 class DQN(nn.Module):
-    def __init__(self, state_size, action_size):
+    def __init__(self, input_size, output_size, hidden_layers):
         super(DQN, self).__init__()
-        self.fc1 = nn.Linear(state_size, config.FC1_UNITS)
-        self.fc2 = nn.Linear(config.FC1_UNITS, config.FC2_UNITS)
-        self.fc3 = nn.Linear(config.FC2_UNITS, action_size)
 
-    def forward(self, state):
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        # List to store layers
+        layers = []
+
+        # Input layer
+        last_size = input_size
+
+        # Hidden layers
+        for layer_size in config.HIDDEN_LAYERS:
+            layers.append(nn.Linear(last_size, layer_size))
+            layers.append(nn.ReLU())  # Activation function
+            last_size = layer_size
+
+        # Output layer
+        layers.append(nn.Linear(last_size, output_size))
+
+        # Register layers as a sequential model
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.model(x)
 
 class ReplayMemory:
     def __init__(self, capacity):
@@ -221,55 +269,93 @@ def optimize_model(memory, policy_net, target_net, optimizer):
     torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 1)
     optimizer.step()
 
-def update_plot(trajectories, x_positions_current, y_positions_current, total_reward_current, ax):
-    # 'trajectories' is a list of tuples: (x_positions, y_positions, total_reward)
+def update_plot(trajectories, x_positions_current, y_positions_current, total_reward_current, ax,
+                top_lines, top_texts, current_line, current_text):
+    # Update top trajectories
+    for i, (x_positions, y_positions, total_reward) in enumerate(trajectories):
+        if i < len(top_lines):
+            # Update existing line and text
+            top_lines[i].set_data(x_positions, y_positions)
+            top_texts[i].set_position((x_positions[-1], y_positions[-1]))
+            top_texts[i].set_text(f"{total_reward:.1f}")
+        else:
+            # Create new line and text
+            line, = ax.plot(x_positions, y_positions, color='blue', linewidth=0.5)
+            text = ax.text(x_positions[-1], y_positions[-1], f"{total_reward:.1f}", fontsize=8)
+            top_lines.append(line)
+            top_texts.append(text)
 
-    # Clear previous trajectories and texts
-    # Remove all lines
-    #for line in ax.lines[:]:
-    #    line.remove()
-    # Remove all texts
-    #for text in ax.texts[:]:
-    #    text.remove()
+    # Hide extra lines and texts if trajectories list is shorter
+    for i in range(len(trajectories), len(top_lines)):
+        top_lines[i].set_data([], [])
+        top_texts[i].set_text('')
 
-    # Plot the top 10 trajectories
-    for x_positions, y_positions, total_reward in trajectories:
-        ax.plot(x_positions, y_positions, color='blue', linewidth=0.5)
-        # Add score at the end of each trajectory
-        ax.text(x_positions[-1], y_positions[-1], f"{total_reward:.1f}", fontsize=8)
-
-    # Plot the current trajectory in a different color
-    ax.plot(x_positions_current, y_positions_current, color='red', linewidth=1.0)
-    ax.text(x_positions_current[-1], y_positions_current[-1], f"{total_reward_current:.1f}", fontsize=10, color='red')
+    # Update current trajectory
+    current_line.set_data(x_positions_current, y_positions_current)
+    current_text.set_position((x_positions_current[-1], y_positions_current[-1]))
+    current_text.set_text(f"{total_reward_current:.1f}")
 
     plt.draw()
-    plt.pause(0.001)
+    #plt.pause(0.001)
 
 
 
-def train(env, policy_net, target_net, optimizer, memory, ax):
-    epsilon = config.EPS_START  # Initialize epsilon
+
+def train(env, policy_net, target_net, optimizer, memory):
+    epsilon = config.EPS_START
     epsilon_decay = (config.EPS_START - config.EPS_END) / config.EPS_DECAY
-    trajectories = []
+    episode_rewards = []
+    average_rewards = []
+    epsilon_values = []
+    loss_values = []
+    q_values = []
+    trajectories = []  # Initialize to store trajectories for later plotting
 
-    for episode in range(config.NUM_EPISODES):
+    for episode in tqdm(range(config.NUM_EPISODES), desc="Training Progress"):
         state = env.reset()
         total_reward = 0
+        total_loss = 0
+        steps = 0
+        max_q_value = 0  # Track max Q-value per episode
+        delta_x_reward = 0
+
+        trajectory_x = []  # X positions for this episode
+        trajectory_y = []  # Y positions for this episode
 
         for t in range(config.MAX_TIMESTEPS):
+            # Store position to track trajectory
+            trajectory_x.append(env.position[0])
+            trajectory_y.append(env.position[1])
+
+            # Choose action
             state = state.to(config.DEVICE)
             action = select_action(state, epsilon, policy_net)
             next_state, reward, done = env.step(action.item())
+
+            # Track reward components
+            delta_x_reward += reward
+            #print("delta_x_reward: ", delta_x_reward)   
+            #delta_x_reward = delta_x_reward * config.DELTA_X_REWARD_FACTOR
+            #delta_x_reward = env._calculate_delta_x_reward()
+            border_penalty = env._calculate_border_penalty()
+            obstacle_penalty = env._calculate_obstacle_penalty()
+
+            # Accumulate rewards and steps
             total_reward += reward
+            steps += 1
 
-            reward_tensor = torch.tensor([reward], device=config.DEVICE)
-            done_tensor = torch.tensor([done], device=config.DEVICE, dtype=torch.bool)
+            # Track max Q-value for chosen action
+            with torch.no_grad():
+                q_value = policy_net(state).max().item()
+                max_q_value = max(max_q_value, q_value)
 
-            memory.push(state, action, reward_tensor, next_state, done_tensor)
+            # Optimize model and check if loss is not None
+            loss = optimize_model(memory, policy_net, target_net, optimizer)
+            if loss is not None:
+                total_loss += loss.item()
+                #print("total_loss: ", total_loss)
 
-            state = next_state
-
-            optimize_model(memory, policy_net, target_net, optimizer)
+            # Log metrics for this episode
 
             if done:
                 break
@@ -278,24 +364,84 @@ def train(env, policy_net, target_net, optimizer, memory, ax):
         if epsilon > config.EPS_END:
             epsilon -= epsilon_decay
 
-        # Update the target network
-        if episode % config.TARGET_UPDATE == 0:
-            target_net.load_state_dict(policy_net.state_dict())
+        
 
-        print(f"Episode {episode + 1}: Total Reward = {total_reward}")
+        # Store epsilon and Q-values for analysis
+        epsilon_values.append(epsilon)
+        q_values.append(max_q_value)
 
-        # Get current trajectory positions
-        x_positions_current = [pos[0] for pos in env.position_history]
-        y_positions_current = [pos[1] for pos in env.position_history]
+        # Add current trajectory to trajectories list
+        trajectories.append((trajectory_x, trajectory_y, total_reward))
+        #print("Episode: ", episode, "Total Reward: ", total_reward)
+        log_metrics(episode, total_reward, episode_rewards, epsilon, total_loss, steps, max_q_value, delta_x_reward, border_penalty, obstacle_penalty)
 
-        # Store the trajectory
-        trajectories.append((x_positions_current, y_positions_current, total_reward))
 
-        # Keep only the top 10 trajectories
-        trajectories = sorted(trajectories, key=lambda x: x[2], reverse=True)[:10]
+    
 
-        # Update the plot
-        update_plot(trajectories, x_positions_current, y_positions_current, total_reward, ax)
+    # Return all collected trajectories
+    return trajectories
+
+
+
+
+
+
+def plot_trajectories(trajectories, env, episode=None):
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+
+    # Setup visualization
+    fig, ax = plt.subplots(figsize=(15, 8))
+    ax.set_xlim(0, env.track_length + 50)
+    ax.set_ylim(-10, env.track_width + 10)
+    ax.set_xlabel('Position X')
+    ax.set_ylabel('Position Y')
+    if episode is not None:
+        ax.set_title(f'Car Trajectories at Episode {episode}')
+    else:
+        ax.set_title('Car Trajectories After Training')
+
+    ax.axhline(y=0, color='red', linestyle='--', label='Track Boundary')
+    ax.axhline(y=env.track_width, color='red', linestyle='--')
+    ax.axvline(x=env.track_length, color='green', linestyle='--', label='Finish Line')
+
+    ax.fill_between([0, env.track_length], 0, env.track_width, color='lightgrey', alpha=0.5, label='Track Area')
+
+    # Draw obstacles
+    for obstacle in env.obstacles:
+        obstacle_x_min = obstacle["center"][0] - obstacle["size"][0] / 2
+        obstacle_y_min = obstacle["center"][1] - obstacle["size"][1] / 2
+        obstacle_rect = patches.Rectangle(
+            (obstacle_x_min, obstacle_y_min),
+            obstacle["size"][0],
+            obstacle["size"][1],
+            linewidth=1,
+            edgecolor='black',
+            facecolor='brown',
+            label='Obstacle'
+        )
+        ax.add_patch(obstacle_rect)
+
+    # Remove duplicate labels
+    handles, labels = ax.get_legend_handles_labels()
+    unique_labels = dict(zip(labels, handles))
+    ax.legend(unique_labels.values(), unique_labels.keys(), loc='upper right')
+
+    # Plot the top 10 trajectories
+    for x_positions, y_positions, total_reward in trajectories:
+        ax.plot(x_positions, y_positions, color='blue', linewidth=0.5)
+        # Add score at the end of each trajectory
+        #ax.text(x_positions[-1], y_positions[-1], f"{total_reward:.1f}", fontsize=8)
+
+    # Save the plot to a file with datetime
+    
+    if episode is not None:
+        filename = f"trajectories_episode_{episode}_{timestamp}.png"
+    else:
+        filename = f"trajectories_final_{timestamp}.png"
+    plt.savefig(filename)
+    plt.close(fig)
+
 
 
 
@@ -304,14 +450,10 @@ def setup_environment():
     return env
 
 def setup_model():
-    policy_net = DQN(config.STATE_SIZE, config.ACTION_SIZE).to(config.DEVICE)
-    target_net = DQN(config.STATE_SIZE, config.ACTION_SIZE).to(config.DEVICE)
-    target_net.load_state_dict(policy_net.state_dict())
-    target_net.eval()
-
-    optimizer = optim.Adam(policy_net.parameters(), lr=config.LEARNING_RATE)
+    policy_net = DQN(config.STATE_SIZE, config.ACTION_SIZE, config.HIDDEN_LAYERS).to(config.DEVICE)
+    target_net = DQN(config.STATE_SIZE, config.ACTION_SIZE, config.HIDDEN_LAYERS).to(config.DEVICE)
+    optimizer = torch.optim.Adam(policy_net.parameters(), lr=config.LEARNING_RATE)
     memory = ReplayMemory(config.MEMORY_CAPACITY)
-
     return policy_net, target_net, optimizer, memory
 
 def setup_visualization(env):
@@ -349,17 +491,75 @@ def setup_visualization(env):
     return fig, ax
 
 def main():
+    print("Training the car track environment with DQN...")
+    print("date and time:", datetime.now())
+    print("Configuration:", config.__file__)
     env = setup_environment()
     policy_net, target_net, optimizer, memory = setup_model()
-    fig, ax = setup_visualization(env)
 
-    train(env, policy_net, target_net, optimizer, memory, ax)
+    # Train and collect trajectories
+    trajectories = train(env, policy_net, target_net, optimizer, memory)
 
-    # Ensure the plot is displayed at the end
-    plt.ioff()  # Turn off interactive mode
-    plt.show()  # Show the plot
+    # After training, plot the final trajectories
+    plot_trajectories(trajectories, env)
 
-    torch.save(policy_net.state_dict(), 'car_track_model.pth')
+def log_metrics(episode, total_reward, average_rewards, epsilon, total_loss, steps, max_q_value, delta_x_reward, border_penalty, obstacle_penalty):
+   
+    # Calculate average reward for the last 100 episodes
+    avg_reward = np.mean(average_rewards[-100:]) if len(average_rewards) >= 100 else (np.mean(average_rewards) if average_rewards else 0)
 
+
+    # Calculate average loss per step
+    avg_loss = total_loss / steps if steps > 0 else 0
+
+    # Print metrics
+    #print(f"Episode {episode + 1}: Reward = {total_reward:.2f}, Avg Reward (100) = {avg_reward:.2f}, "
+    #      f"Epsilon = {epsilon:.3f}, Avg Loss = {avg_loss:.4f}, Max Q-Value = {max_q_value:.2f}, Steps = {steps}"
+    #      f"Reward Breakdown -> Delta_x Reward: {delta_x_reward:.2f}, Border Penalty: {border_penalty:.2f}, Obstacle Penalty: {obstacle_penalty:.2f}")
+    #print(f"Episode {episode + 1}: Reward = {total_reward:.2f}, Avg Reward (100) = {avg_reward:.2f} Steps = {steps}")
+
+    # Append to the moving averages and logs
+    average_rewards.append(total_reward)
+    # Append log to file
+    with open(trlog, "a") as log_file:
+        log_file.write(f"Episode {episode + 1}: Reward = {total_reward:.2f}, Avg Reward (100) = {avg_reward:.2f}, "
+                       f"Epsilon = {epsilon:.3f}, Avg Loss = {avg_loss:.4f}, Max Q-Value = {max_q_value:.2f}, Steps = {steps}, "
+                       f"Reward Breakdown -> Delta_x Reward: {delta_x_reward:.2f}, Border Penalty: {border_penalty:.2f}, Obstacle Penalty: {obstacle_penalty:.2f}\n")
+    
+
+def clean_up():
+    os.chdir(os.path.dirname(__file__))
+    delete_files = [file for file in os.listdir() if file.endswith(".png")]
+    for file in delete_files:
+        try:
+            os.remove(file)
+        except FileNotFoundError:
+            pass
+
+def initLog():
+    
+    with open(trlog, "w") as log_file:
+        log_file.write("Training Log\n" + timestamp + "\n")
+        log_file.write("-----------\n")
+        log_file.write(f"Configuration: {config.__file__}\n\n")
+        log_file.write("Training Metrics\n")
+        log_file.write("---------------\n")
+        log_file.write("Configuration Items\n")
+        log_file.write("--------------------\n")
+        
+        # Loop through each attribute in config and log its value
+        for key, value in vars(config).items():
+            if not key.startswith("__"):  # Skip special attributes
+                log_file.write(f"{key}: {value}\n")
+                
+        log_file.write("\nTraining Progress\n")
+        log_file.write("-----------------\n")
+
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+trlog = f"training_log_{timestamp}.txt"
 if __name__ == "__main__":
+    print("Training the car track environment with DQN...")
+    #clean_up()
+    initLog()
     main()
+    print("Training complete. Check the 'training_log.txt' file for details.")
