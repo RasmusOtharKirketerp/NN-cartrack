@@ -9,6 +9,10 @@ import config  # Import the configuration file
 from nn import CarTrackEnv  # Import the environment
 
 def load_trajectories(trajectory_dir='trajectories'):
+    """
+    Load all trajectory files from the specified directory.
+    Returns a list of trajectory data dictionaries.
+    """
     # Get a list of trajectory files
     trajectory_files = sorted([
         os.path.join(trajectory_dir, f) for f in os.listdir(trajectory_dir)
@@ -21,50 +25,29 @@ def load_trajectories(trajectory_dir='trajectories'):
             trajectories.append(trajectory_data)
     return trajectories
 
-def parse_training_log(log_filename):
-    episode_data = {}
+def load_episode_info(log_filename):
+    """
+    Load episode information strings from the log file.
+    Returns a dictionary mapping episode numbers to their corresponding log lines.
+    """
+    episode_info = {}
     with open(log_filename, 'r') as f:
         lines = f.readlines()
     for line in lines:
         if line.startswith('Episode'):
-            # Remove 'Episode ' and split at ': '
-            episode_num, rest = line[len('Episode '):].split(': ', 1)
-            episode_num = int(episode_num)
-            # Split the rest of the line by ', '
-            metrics = rest.strip().split(', ')
-            data = {}
-            for metric in metrics:
-                if 'Reward Breakdown ->' in metric:
-                    # Handle Reward Breakdown
-                    breakdown = metric.split('->')[1].strip()
-                    breakdown_items = breakdown.split(', ')
-                    for item in breakdown_items:
-                        key, value = item.split(': ')
-                        data[key.strip()] = float(value)
-                else:
-                    key_value = metric.split(' = ')
-                    if len(key_value) == 2:
-                        key, value = key_value
-                        key = key.strip()
-                        if key == 'Epsilon':
-                            data[key] = float(value)
-                        elif key == 'Steps':
-                            data[key] = int(value)
-                        else:
-                            try:
-                                data[key] = float(value)
-                            except ValueError:
-                                data[key] = value
-            episode_data[episode_num] = data
-    return episode_data
+            # Extract episode number
+            try:
+                episode_part, _ = line.split(':', 1)
+                episode_num = int(episode_part.strip().split(' ')[1])
+                episode_info[episode_num] = line.strip()
+            except (IndexError, ValueError):
+                continue  # Skip malformed lines
+    return episode_info
 
-def format_value(value, fmt=".2f"):
-    if isinstance(value, (int, float)):
-        return format(value, fmt)
-    else:
-        return str(value)
-
-def plot_trajectory(env, trajectories, episode_data, episode_number):
+def plot_trajectory(env, trajectories, episode_info, episode_number):
+    """
+    Plot the trajectory for a given episode and display the corresponding info string.
+    """
     # Setup visualization
     fig, ax = plt.subplots(figsize=(15, 8))
     plt.subplots_adjust(bottom=0.25)  # Adjust space for widgets and text
@@ -73,7 +56,7 @@ def plot_trajectory(env, trajectories, episode_data, episode_number):
     ax.set_ylim(-10, env.track_width + 10)
     ax.set_xlabel('Position X')
     ax.set_ylabel('Position Y')
-    ax.set_title(f'Episode {episode_number + 1}')
+    ax.set_title(f'Episode {episode_number}')
 
     ax.axhline(y=0, color='red', linestyle='--', label='Track Boundary')
     ax.axhline(y=env.track_width, color='red', linestyle='--')
@@ -102,52 +85,31 @@ def plot_trajectory(env, trajectories, episode_data, episode_number):
     ax.legend(unique.values(), unique.keys(), loc='upper right')
 
     # Extract trajectory data
-    trajectory_data = trajectories[episode_number]
+    trajectory_data = trajectories[episode_number - 1]  # Assuming episode_number starts at 1
     positions = trajectory_data['positions']
     x_positions = [pos[0] for pos in positions]
     y_positions = [pos[1] for pos in positions]
 
     # Plot the trajectory
-    line, = ax.plot(x_positions, y_positions, color='blue', linewidth=2)
+    line, = ax.plot(x_positions, y_positions, color='blue', linewidth=2, label='Trajectory')
 
     # Add text box for episode data
     text_ax = fig.add_axes([0.05, 0.05, 0.9, 0.15])
     text_ax.axis('off')  # Hide axis
 
-    def update_episode_data(episode_num):
-        data = episode_data.get(episode_num + 1, None)
-        if data:
-            # Extract values and use format_value to safely format them
-            reward = format_value(data.get('Reward', 'N/A'))
-            avg_reward = format_value(data.get('Avg Reward (100)', 'N/A'))
-            epsilon = format_value(data.get('Epsilon', 'N/A'), fmt=".3f")
-            avg_loss = format_value(data.get('Avg Loss', 'N/A'), fmt=".4f")
-            max_q_value = format_value(data.get('Max Q-Value', 'N/A'))
-            steps = data.get('Steps', 'N/A')
-            delta_x_reward = format_value(data.get('Delta_x Reward', 'N/A'))
-            border_penalty = format_value(data.get('Border Penalty', 'N/A'))
-            obstacle_penalty = format_value(data.get('Obstacle Penalty', 'N/A'))
-
-            info_text = (
-                f"Reward = {reward}, "
-                f"Avg Reward (100) = {avg_reward}, "
-                f"Epsilon = {epsilon}, "
-                f"Avg Loss = {avg_loss}, "
-                f"Max Q-Value = {max_q_value}, "
-                f"Steps = {steps}\n"
-                f"Delta_x Reward = {delta_x_reward}, "
-                f"Border Penalty = {border_penalty}, "
-                f"Obstacle Penalty = {obstacle_penalty}"
-            )
-        else:
-            info_text = f"No data available for Episode {episode_num + 1}."
-
+    def update_episode_info(episode_num):
+        """
+        Update the information text displayed on the plot based on the selected episode.
+        """
+        info_string = episode_info.get(episode_num, f"No data available for Episode {episode_num}.")
         text_ax.clear()
-        text_ax.text(0.5, 0.5, info_text, horizontalalignment='center', verticalalignment='center', fontsize=12)
+        text_ax.text(0.5, 0.5, info_string, horizontalalignment='center',
+                    verticalalignment='center', fontsize=12, wrap=True)
         text_ax.axis('off')
+        fig.canvas.draw_idle()
 
     # Initial display of episode data
-    update_episode_data(episode_number)
+    update_episode_info(episode_number)
 
     # Add a slider to select episodes
     ax_episode = plt.axes([0.2, 0.15, 0.65, 0.03])  # Adjust position for text box
@@ -156,30 +118,36 @@ def plot_trajectory(env, trajectories, episode_data, episode_number):
         label='Episode',
         valmin=1,
         valmax=len(trajectories),
-        valinit=episode_number + 1,
+        valinit=episode_number,
         valfmt='%0.0f',
         valstep=1
     )
 
     def update(val):
-        episode = int(episode_slider.val) - 1
-        trajectory_data = trajectories[episode]
+        """
+        Update the plot and information text when the slider value changes.
+        """
+        episode = int(episode_slider.val)
+        trajectory_data = trajectories[episode - 1]
         positions = trajectory_data['positions']
         x_positions = [pos[0] for pos in positions]
         y_positions = [pos[1] for pos in positions]
 
         # Update the data of the line
         line.set_data(x_positions, y_positions)
-        ax.set_title(f'Episode {episode + 1}')
+        ax.set_title(f'Episode {episode}')
         ax.figure.canvas.draw_idle()
 
-        # Update episode data text
-        update_episode_data(episode)
+        # Update episode info text
+        update_episode_info(episode)
 
     episode_slider.on_changed(update)
 
     # Add keyboard event handler
     def on_key(event):
+        """
+        Allow left/right arrow keys to navigate between episodes.
+        """
         if event.key == 'left':
             current_val = episode_slider.val
             if current_val > episode_slider.valmin:
@@ -194,7 +162,10 @@ def plot_trajectory(env, trajectories, episode_data, episode_number):
     plt.show()
 
 if __name__ == '__main__':
+    # Initialize the environment
     env = CarTrackEnv()
+
+    # Load all trajectories
     trajectories = load_trajectories()
 
     if not trajectories:
@@ -205,10 +176,11 @@ if __name__ == '__main__':
         log_files = [f for f in os.listdir('.') if f.startswith('training_log_') and f.endswith('.txt')]
         if log_files:
             log_filename = max(log_files, key=os.path.getctime)  # Get the most recent log file
-            episode_data = parse_training_log(log_filename)
+            episode_info = load_episode_info(log_filename)
         else:
             print("No training log file found.")
-            episode_data = {}
+            episode_info = {}
 
         # Start by displaying the first episode
-        plot_trajectory(env, trajectories, episode_data, 0)
+        initial_episode = 1  # Assuming episodes start at 1
+        plot_trajectory(env, trajectories, episode_info, initial_episode)
