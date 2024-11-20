@@ -29,7 +29,7 @@ EPS_DECAY = 1000  # Faster decay
 TARGET_UPDATE = 10  # Update target network less frequently
 MEMORY_CAPACITY = 30000
 
-NUM_EPISODES = 15000
+NUM_EPISODES = 1500
 
 # Agent parameters
 MAX_SPEED = 4.0

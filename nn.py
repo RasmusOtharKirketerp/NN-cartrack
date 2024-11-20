@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import all_episodes
 import config  # Import configuration file
 from tqdm import tqdm
 
@@ -53,6 +54,7 @@ class CarTrackEnv:
         return torch.tensor(state, dtype=torch.float32).to(config.DEVICE)
 
     def step(self, action):
+        import math  # Add this import at the top of your file if not already present
         if self.done:
             return self._get_state(), 0, self.done, {}
 
@@ -63,7 +65,8 @@ class CarTrackEnv:
 
         # Calculate forward progress in the x-direction
         delta_x = self.position[0] - self.prev_position_x
-        delta_x_reward = max(delta_x, 0) * config.DELTA_X_REWARD_FACTOR  # Reward only for forward movement
+        SCALING_FACTOR = 2  
+        delta_x_reward = config.DELTA_X_REWARD_FACTOR * math.exp(max(delta_x, 0) / SCALING_FACTOR)
 
         self.timestep += 1  # Increment timestep
 
@@ -436,6 +439,17 @@ def setup_model():
     return policy_net, target_net, optimizer, memory
 
 def main():
+    # Delete all files in the trajectories directory
+    trajectory_dir = 'trajectories'
+    if os.path.exists(trajectory_dir):
+        for filename in os.listdir(trajectory_dir):
+            file_path = os.path.join(trajectory_dir, filename)
+            try:
+                if os.path.isfile(file_path):
+                    os.unlink(file_path)
+            except Exception as e:
+                print(f'Failed to delete {file_path}. Reason: {e}')
+    
     print("Training the car track environment with DQN...")
     print("Date and time:", datetime.now())
     print("Configuration:", config.__file__)
@@ -490,3 +504,6 @@ trlog = f"training_log_{timestamp}.txt"
 if __name__ == "__main__":
     initLog()
     main()
+    all_episodes.main()
+    
+

@@ -1,2 +1,2 @@
-# Ignore the trajectories directory
-trajectories/
+# Ignore all .pkl files in trajectories directory
+trajectories/*.pkl
