@@ -1,4 +1,5 @@
 # nn.py
+import pickle
 import os
 import torch
 import torch.nn as nn
@@ -256,6 +257,19 @@ def optimize_model(memory, policy_net, target_net, optimizer):
 
     return loss  # Return loss for logging
 
+def save_trajectory(episode, trajectory_data):
+    # Create a directory to save trajectories if it doesn't exist
+    trajectory_dir = 'trajectories'
+    os.makedirs(trajectory_dir, exist_ok=True)
+
+    # Define the filename for the trajectory
+    filename = os.path.join(trajectory_dir, f'trajectory_episode_{episode + 1}.pkl')
+
+    # Save the trajectory data to the file
+    with open(filename, 'wb') as f:
+        pickle.dump(trajectory_data, f)
+
+
 def train(env, policy_net, target_net, optimizer, memory):
     epsilon = config.EPS_START
     epsilon_decay = (config.EPS_START - config.EPS_END) / config.EPS_DECAY
@@ -280,6 +294,14 @@ def train(env, policy_net, target_net, optimizer, memory):
 
         trajectory_x = []  # X positions for this episode
         trajectory_y = []  # Y positions for this episode
+
+        # Initialize trajectory data for this episode
+        trajectory_data = {
+            'positions': [],
+            'actions': [],
+            'rewards': [],
+            'dones': [],
+        }
 
         for t in range(config.MAX_TIMESTEPS):
             # Store position to track trajectory
@@ -316,9 +338,15 @@ def train(env, policy_net, target_net, optimizer, memory):
             if loss is not None:
                 total_loss += loss.item()
 
+             # Store position and action
+            trajectory_data['positions'].append(env.position.copy())
+            trajectory_data['actions'].append(action.item())
+            trajectory_data['rewards'].append(reward)
+            trajectory_data['dones'].append(done)
+
             if done:
                 break
-
+        save_trajectory(episode, trajectory_data)
         # Update epsilon
         if epsilon > config.EPS_END:
             epsilon -= epsilon_decay
@@ -332,14 +360,14 @@ def train(env, policy_net, target_net, optimizer, memory):
         q_values.append(max_q_value)
 
         # Add current trajectory to trajectories list
-        trajectories.append((trajectory_x, trajectory_y, total_reward))
+        #trajectories.append((trajectory_x, trajectory_y, total_reward))
 
         # Log metrics for this episode
         log_metrics(episode, total_reward, average_rewards, epsilon, total_loss, steps, max_q_value,
                     delta_x_reward_total, border_penalty_total, obstacle_penalty_total)
 
     # Return all collected trajectories
-    return trajectories
+    #return trajectories
 
 def plot_trajectories(trajectories, env, episode=None):
     import matplotlib.pyplot as plt
@@ -415,11 +443,11 @@ def main():
     policy_net, target_net, optimizer, memory = setup_model()
 
     # Train and collect trajectories
-    trajectories = train(env, policy_net, target_net, optimizer, memory)
+    train(env, policy_net, target_net, optimizer, memory)
 
     # After training, plot the final trajectories
-    plot_trajectories(trajectories, env)
-    print("Training complete. Check the 'training_log.txt' file for details.")
+    #plot_trajectories(trajectories, env)
+    print("Training complete. Trajectories have been saved to the 'trajectories' directory.")
 
 def log_metrics(episode, total_reward, average_rewards, epsilon, total_loss, steps, max_q_value,
                 delta_x_reward, border_penalty, obstacle_penalty):
