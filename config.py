@@ -1,5 +1,3 @@
-# config.py
-
 import torch
 import numpy as np
 
@@ -8,11 +6,11 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: ", DEVICE)
 
 # Track and environment settings
-TRACK_LENGTH = 300  # Extended length of the track
-TRACK_WIDTH = 50    # Extended width of the track
-MAX_TIMESTEPS = 1100  # Maximum timesteps per episode
-BORDER_THRESHOLD = 1.0  # Threshold for penalizing proximity to the border
-OBSTACLE_THRESHOLD = 1.0  # Threshold for penalizing proximity to obstacles
+TRACK_LENGTH = 300
+TRACK_WIDTH = 50
+MAX_TIMESTEPS = 1100
+BORDER_THRESHOLD = 10.0  # Adjusted for consistency
+OBSTACLE_THRESHOLD = 1.0
 
 # Obstacle definitions
 OBSTACLES = [
@@ -21,41 +19,39 @@ OBSTACLES = [
     {"center": np.array([TRACK_LENGTH - 75, 5], dtype=np.float32), "size": np.array([30.0, 20.0], dtype=np.float32)}
 ]
 
-# DQN parameters - adjusted
-LEARNING_RATE = 5e-4  # Increased for more impactful updates
+# DQN parameters
+LEARNING_RATE = 1e-4  # Slightly reduced for stability
 BATCH_SIZE = 64
-GAMMA = 0.98  # Increased slightly for better discounting of future rewards
+GAMMA = 0.99  # Increased for better future reward consideration
 EPS_START = 1.0
 EPS_END = 0.1
-EPS_DECAY = 1500  # Faster decay to help the agent exploit learned actions sooner
-TARGET_UPDATE = 5  # More frequent updates to align with policy network
-MEMORY_CAPACITY = 30000  # Increased memory capacity to retain more diverse experiences
+EPS_DECAY = 1000  # Faster decay
+TARGET_UPDATE = 10  # Update target network less frequently
+MEMORY_CAPACITY = 30000
 
-# Number of episodes to train the agent
-NUM_EPISODES = 15000
+NUM_EPISODES = 1500
 
 # Agent parameters
 MAX_SPEED = 4.0
-ACCELERATION = 0.9  # Reduced slightly to make agent movement more controlled
-STEERING = 0.8  # Reduced steering for smoother directional changes
+ACCELERATION = 0.9
+STEERING = 0.8
 
-HIDDEN_LAYERS = {256, 256, 128}
+HIDDEN_LAYERS = [256, 256, 128]  # Use a list to preserve order
 
-# Reward and penalty values - adjusted
-REWARD_GOAL = 200000  # Increased to further encourage reaching the goal
-PENALTY_OFF_TRACK = -1000  # Reduced slightly to prevent overwhelming negative rewards
-PENALTY_OBSTACLE = -90  # Increased for obstacle penalty to discourage hitting obstacles
-PENALTY_BORDER = 3000  # Reduced to allow more flexibility without steep penalty
-PENALTY_BACKWARDS = -100  # Increased slightly to discourage
-PENALTY_TIME_LIMIT = -25  # Reduced time limit penalty to give agent more time to explore
-BORDER_THRESHOLD = 10.0  # Increased to allow more flexibility near the borders
-# Forward reward encourages agent to move along the track smoothly
-DELTA_X_REWARD_FACTOR = 250  # Adjusted to give more weight to forward movement
-TIME_PENALTY = -1  # Reduced time penalty for each step to avoid discouraging exploration
+# Reward and penalty values
+REWARD_GOAL = 100       # Positive reward
+PENALTY_OFF_TRACK = 100 # Positive penalty
+PENALTY_OBSTACLE = 100  # Positive penalty
+PENALTY_BORDER = 10     # Positive penalty
+PENALTY_BACKWARDS = 50  # Positive penalty
+PENALTY_TIME_LIMIT = 10 # Positive penalty
+DELTA_X_REWARD_FACTOR = 1.0  # Positive reward factor
+TIME_PENALTY = 0.1      # Positive penalty per timestep
+
 
 # State and action sizes
-STATE_SIZE = 12  # Adjusted according to the state representation
-ACTION_SIZE = 4  # Number of possible actions: Accelerate, Decelerate, Steer Left, Steer Right
+STATE_SIZE = 12
+ACTION_SIZE = 4
 
 # Drawing parameters
 PROCENTAGE_TO_DRAW = 0.9
