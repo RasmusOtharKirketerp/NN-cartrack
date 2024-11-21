@@ -16,6 +16,7 @@ import config  # Import configuration file
 from tqdm import tqdm
 from env import CarTrackEnv
 
+log_entries = []  # Store logs in memory to write at the end
 
 class DQN(nn.Module):
     def __init__(self, input_size, output_size, hidden_layers):
@@ -114,6 +115,7 @@ def train(env, policy_net, target_net, optimizer, memory):
     loss_values = []
     q_values = []
     trajectories = []  # Initialize to store trajectories for later plotting
+    
 
     for episode in tqdm(range(config.NUM_EPISODES), desc="Training Progress"):
         state = env.reset()
@@ -200,6 +202,10 @@ def train(env, policy_net, target_net, optimizer, memory):
         # Log metrics for this episode
         log_metrics(episode, total_reward, average_rewards, epsilon, total_loss, steps, max_q_value,
                     delta_x_reward_total, border_penalty_total, obstacle_penalty_total)
+        
+    # Write all logs to file at the end
+    with open(trlog, "w") as log_file:
+        log_file.writelines(log_entries)
 
 
 def setup_environment():
@@ -251,10 +257,16 @@ def log_metrics(episode, total_reward, average_rewards, epsilon, total_loss, ste
     average_rewards.append(total_reward)
 
     # Append log to file
-    with open(trlog, "a") as log_file:
-        log_file.write(f"Episode {episode + 1}: Reward = {total_reward:.2f}, Avg Reward (100) = {avg_reward:.2f}, "
-                       f"Epsilon = {epsilon:.3f}, Avg Loss = {avg_loss:.4f}, Max Q-Value = {max_q_value:.2f}, Steps = {steps}, "
-                       f"Reward Breakdown -> Delta_x Reward: {delta_x_reward:.2f}, Border Penalty: {border_penalty:.2f}, Obstacle Penalty: {obstacle_penalty:.2f}\n")
+    #with open(trlog, "a") as log_file:
+    #    log_file.write(f"Episode {episode + 1}: Reward = {total_reward:.2f}, Avg Reward (100) = {avg_reward:.2f}, "
+    #                   f"Epsilon = {epsilon:.3f}, Avg Loss = {avg_loss:.4f}, Max Q-Value = {max_q_value:.2f}, Steps = {steps}, "
+    #                   f"Reward Breakdown -> Delta_x Reward: {delta_x_reward:.2f}, Border Penalty: {border_penalty:.2f}, Obstacle Penalty: {obstacle_penalty:.2f}\n")
+        
+    log_entries.append(
+            f"Episode {episode + 1}: Reward = {total_reward:.2f}, Avg Reward (100) = {avg_reward:.2f}, "
+            f"Epsilon = {epsilon:.3f}, Avg Loss = {avg_loss:.4f}, Max Q-Value = {max_q_value:.2f}, Steps = {steps}, "
+            f"Reward Breakdown -> Delta_x Reward: {delta_x_reward:.2f}, Border Penalty: {border_penalty:.2f}, Obstacle Penalty: {obstacle_penalty:.2f}\n"
+        )
 
 def initLog():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

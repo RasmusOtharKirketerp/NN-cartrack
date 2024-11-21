@@ -36,10 +36,10 @@ MAX_SPEED = 4.0
 ACCELERATION = 0.9
 STEERING = 0.8
 
-HIDDEN_LAYERS = [256, 256, 128]  # Use a list to preserve order
+HIDDEN_LAYERS = [256, 128, 256, 128, 128, 128]  # Use a list to preserve order
 
 # Reward and penalty values
-REWARD_GOAL = 100       # Positive reward
+REWARD_GOAL = 10000       # Positive reward
 PENALTY_OFF_TRACK = 100 # Positive penalty
 PENALTY_OBSTACLE = 100  # Positive penalty
 PENALTY_BORDER = 10     # Positive penalty
