@@ -27,7 +27,7 @@ EPS_START = 1.0
 EPS_END = 0.1
 EPS_DECAY = 1000  # Faster decay
 TARGET_UPDATE = 10  # Update target network less frequently
-MEMORY_CAPACITY = 30000
+MEMORY_CAPACITY = 100000
 
 NUM_EPISODES = 1500
 
@@ -46,7 +46,7 @@ PENALTY_BORDER = 10     # Positive penalty
 PENALTY_BACKWARDS = 50  # Positive penalty
 PENALTY_TIME_LIMIT = 10 # Positive penalty
 DELTA_X_REWARD_FACTOR = 200.0  # Positive reward factor
-TIME_PENALTY = 0.1      # Positive penalty per timestep
+TIME_PENALTY = 1      # Positive penalty per timestep
 
 
 # State and action sizes

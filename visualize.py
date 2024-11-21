@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 from matplotlib.widgets import Slider
 from datetime import datetime
 import config  # Import the configuration file
-from nn import CarTrackEnv  # Import the environment
+from env import CarTrackEnv  # Ensure this module is accessible
 
 def load_trajectories(trajectory_dir='trajectories'):
     """
