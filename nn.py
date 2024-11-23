@@ -108,6 +108,8 @@ def save_trajectory(episode, trajectory_data):
 
 def train(env, policy_net, target_net, optimizer, memory):
     epsilon = config.EPS_START
+    epsilon = max(config.EPS_END, epsilon * config.EPS_DECAY)
+
     epsilon_decay = (config.EPS_START - config.EPS_END) / config.EPS_DECAY
     episode_rewards = []
     average_rewards = []

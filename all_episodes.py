@@ -6,8 +6,9 @@ import matplotlib.patches as patches
 from matplotlib import cm
 from matplotlib.colors import Normalize
 import matplotlib.lines as mlines
-from nn import CarTrackEnv  # Ensure this module is accessible
+from env import CarTrackEnv  # Ensure this module is accessible
 import re
+from datetime import datetime
 
 def load_trajectories(trajectory_dir='trajectories'):
     """
@@ -155,8 +156,8 @@ def plot_all_trajectories(env, trajectories, episode_info, top_n=10, output_file
         end_pos = positions[-1]  # Last position for annotation
 
         # Offset the text slightly for better visibility
-        text_x = end_pos[0] + 5
-        text_y = end_pos[1] + 5
+        text_x = end_pos[0]
+        text_y = end_pos[1]
 
         ax.text(
             text_x, text_y,
@@ -170,6 +171,7 @@ def plot_all_trajectories(env, trajectories, episode_info, top_n=10, output_file
     # Remove all legends and tables (already omitted)
     # Save the plot as a PNG file
     plt.savefig(output_file, bbox_inches='tight', dpi=300)
+    plt.show()
     plt.close(fig)  # Close the figure to free memory
     print(f"All episodes have been plotted and saved to '{output_file}'. Top {top_n} episodes highlighted.")
 
@@ -198,7 +200,10 @@ def main():
         episode_info = {}
 
     # Plot all episodes and save as PNG with top 10 highlights
-    output_file = 'all_episodes_highlight_top10.png'
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Add the timestamp to the filename
+    output_file = f'all_episodes_highlight_top10_{timestamp}.png'
     plot_all_trajectories(env, trajectories, episode_info, top_n=20, output_file=output_file)
 
 if __name__ == '__main__':

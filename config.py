@@ -8,9 +8,8 @@ print("Device: ", DEVICE)
 # Track and environment settings
 TRACK_LENGTH = 300
 TRACK_WIDTH = 50
-MAX_TIMESTEPS = 1100
-BORDER_THRESHOLD = 10.0  # Adjusted for consistency
-OBSTACLE_THRESHOLD = 1.0
+MAX_TIMESTEPS = 200
+
 
 # Obstacle definitions
 OBSTACLES = [
@@ -20,33 +19,38 @@ OBSTACLES = [
 ]
 
 # DQN parameters
-LEARNING_RATE = 1e-4  # Slightly reduced for stability
+LEARNING_RATE = 1e-5  # Slightly reduced for stability
 BATCH_SIZE = 64
 GAMMA = 0.99  # Increased for better future reward consideration
-EPS_START = 1.0
+EPS_START = 0.5
 EPS_END = 0.1
-EPS_DECAY = 1000  # Faster decay
+EPS_DECAY = 0.999  # Faster decay
 TARGET_UPDATE = 10  # Update target network less frequently
 MEMORY_CAPACITY = 100000
 
-NUM_EPISODES = 1500
+NUM_EPISODES = 2600
 
 # Agent parameters
-MAX_SPEED = 4.0
-ACCELERATION = 0.9
-STEERING = 0.8
+MAX_SPEED = 5
+ACCELERATION = 1
+STEERING = 0.9
 
-HIDDEN_LAYERS = [256, 128, 256, 128, 128, 128]  # Use a list to preserve order
+HIDDEN_LAYERS = [32, 32, 32, 32]  # Use a list to preserve order
 
 # Reward and penalty values
-REWARD_GOAL = 10000       # Positive reward
-PENALTY_OFF_TRACK = 100 # Positive penalty
-PENALTY_OBSTACLE = 100  # Positive penalty
-PENALTY_BORDER = 10     # Positive penalty
-PENALTY_BACKWARDS = 50  # Positive penalty
-PENALTY_TIME_LIMIT = 10 # Positive penalty
-DELTA_X_REWARD_FACTOR = 200.0  # Positive reward factor
-TIME_PENALTY = 1      # Positive penalty per timestep
+REWARD_GOAL = 100  # Positive reward
+
+# Define other values as factors of the REWARD_GOAL
+PENALTY_OFF_TRACK = REWARD_GOAL // 1  # Same as REWARD_GOAL
+PENALTY_OBSTACLE = REWARD_GOAL // 1
+PENALTY_BORDER = REWARD_GOAL // 1
+PENALTY_BACKWARDS = REWARD_GOAL // 100  # Approximate to a close factor
+PENALTY_TIME_LIMIT = REWARD_GOAL // 20
+DELTA_X_REWARD_FACTOR = REWARD_GOAL / 2  # Adjusted for precision, still a factor
+TIME_PENALTY = REWARD_GOAL // 1  # 
+BORDER_THRESHOLD = REWARD_GOAL // 1000
+OBSTACLE_THRESHOLD = REWARD_GOAL // 1000  
+
 
 
 # State and action sizes
@@ -54,5 +58,5 @@ STATE_SIZE = 12
 ACTION_SIZE = 4
 
 # Drawing parameters
-PROCENTAGE_TO_DRAW = 0.9
+PROCENTAGE_TO_DRAW = 0.5
 DRAW_BEST_TRAJECTORIES = int(NUM_EPISODES * PROCENTAGE_TO_DRAW) + 1
