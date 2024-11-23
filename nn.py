@@ -15,6 +15,8 @@ import all_episodes
 import config  # Import configuration file
 from tqdm import tqdm
 from env import CarTrackEnv
+from hdf5_logger import HDF5Logger
+
 
 log_entries = []  # Store logs in memory to write at the end
 
@@ -107,17 +109,14 @@ def save_trajectory(episode, trajectory_data):
 
 
 def train(env, policy_net, target_net, optimizer, memory):
-    epsilon = config.EPS_START
-    epsilon = max(config.EPS_END, epsilon * config.EPS_DECAY)
+    epsilon = config.EPS_START  # Start at EPS_START
 
-    epsilon_decay = (config.EPS_START - config.EPS_END) / config.EPS_DECAY
     episode_rewards = []
     average_rewards = []
     epsilon_values = []
     loss_values = []
     q_values = []
     trajectories = []  # Initialize to store trajectories for later plotting
-    
 
     for episode in tqdm(range(config.NUM_EPISODES), desc="Training Progress"):
         state = env.reset()
@@ -177,18 +176,26 @@ def train(env, policy_net, target_net, optimizer, memory):
             if loss is not None:
                 total_loss += loss.item()
 
-             # Store position and action
+            # Store position and action
             trajectory_data['positions'].append(env.position.copy())
             trajectory_data['actions'].append(action.item())
             trajectory_data['rewards'].append(reward)
             trajectory_data['dones'].append(done)
 
             if done:
+                # Check if the goal was reached
+                if info.get('goal_reached', False):  # Assume 'goal_reached' is a flag in the info dictionary
+                    reward += config.REWARD_GOAL
+                else:
+                    # Apply a penalty for failing to reach the goal (optional)
+                    reward -= config.PENALTY_TERMINATION
                 break
+
         save_trajectory(episode, trajectory_data)
-        # Update epsilon
+
+        # Update epsilon after each episode
         if epsilon > config.EPS_END:
-            epsilon -= epsilon_decay
+            epsilon -= (config.EPS_START - config.EPS_END) / config.EPS_DECAY
 
         # Update target network periodically
         if episode % config.TARGET_UPDATE == 0:
@@ -198,16 +205,14 @@ def train(env, policy_net, target_net, optimizer, memory):
         epsilon_values.append(epsilon)
         q_values.append(max_q_value)
 
-        # Add current trajectory to trajectories list
-        #trajectories.append((trajectory_x, trajectory_y, total_reward))
-
         # Log metrics for this episode
         log_metrics(episode, total_reward, average_rewards, epsilon, total_loss, steps, max_q_value,
                     delta_x_reward_total, border_penalty_total, obstacle_penalty_total)
-        
-    # Write all logs to file at the end
-    with open(trlog, "w") as log_file:
-        log_file.writelines(log_entries)
+
+    # Save all logs to HDF5
+    hdf5_logger.save_logs(log_entries)
+
+
 
 
 def setup_environment():
@@ -249,26 +254,27 @@ def main():
 
 def log_metrics(episode, total_reward, average_rewards, epsilon, total_loss, steps, max_q_value,
                 delta_x_reward, border_penalty, obstacle_penalty):
-    # Calculate average reward for the last 100 episodes
     avg_reward = np.mean(average_rewards[-100:]) if len(average_rewards) >= 100 else (np.mean(average_rewards) if average_rewards else 0)
-
-    # Calculate average loss per step
     avg_loss = total_loss / steps if steps > 0 else 0
 
-    # Append to the moving averages and logs
-    average_rewards.append(total_reward)
+    # Append structured data to log_entries
+    log_entries.append({
+        "episode": episode + 1,
+        "reward": total_reward,
+        "avg_reward_100": avg_reward,
+        "epsilon": epsilon,
+        "avg_loss": avg_loss,
+        "max_q_value": max_q_value,
+        "steps": steps,
+        "reward_breakdown": {
+            "delta_x_reward": delta_x_reward,
+            "border_penalty": border_penalty,
+            "obstacle_penalty": obstacle_penalty,
+        }
+    })
 
-    # Append log to file
-    #with open(trlog, "a") as log_file:
-    #    log_file.write(f"Episode {episode + 1}: Reward = {total_reward:.2f}, Avg Reward (100) = {avg_reward:.2f}, "
-    #                   f"Epsilon = {epsilon:.3f}, Avg Loss = {avg_loss:.4f}, Max Q-Value = {max_q_value:.2f}, Steps = {steps}, "
-    #                   f"Reward Breakdown -> Delta_x Reward: {delta_x_reward:.2f}, Border Penalty: {border_penalty:.2f}, Obstacle Penalty: {obstacle_penalty:.2f}\n")
-        
-    log_entries.append(
-            f"Episode {episode + 1}: Reward = {total_reward:.2f}, Avg Reward (100) = {avg_reward:.2f}, "
-            f"Epsilon = {epsilon:.3f}, Avg Loss = {avg_loss:.4f}, Max Q-Value = {max_q_value:.2f}, Steps = {steps}, "
-            f"Reward Breakdown -> Delta_x Reward: {delta_x_reward:.2f}, Border Penalty: {border_penalty:.2f}, Obstacle Penalty: {obstacle_penalty:.2f}\n"
-        )
+    average_rewards.append(total_reward)  # Update rewards for plotting
+
 
 def initLog():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -291,6 +297,8 @@ def initLog():
 
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 trlog = f"training_log_{timestamp}.txt"
+hdf5_logger = HDF5Logger("training_logs.hdf5")
+
 if __name__ == "__main__":
     initLog()
     main()

@@ -1,4 +1,3 @@
-# visualize.py
 import os
 import pickle
 import matplotlib.pyplot as plt
@@ -6,6 +5,7 @@ import matplotlib.patches as patches
 from matplotlib.widgets import Slider
 from datetime import datetime
 from env import CarTrackEnv  # Ensure this module is accessible
+from hdf5_logger import HDF5Logger  # Use HDF5Logger to load structured log data
 
 def load_trajectories(trajectory_dir='trajectories'):
     """
@@ -24,32 +24,13 @@ def load_trajectories(trajectory_dir='trajectories'):
             trajectories.append(trajectory_data)
     return trajectories
 
-def load_episode_info(log_filename):
-    """
-    Load episode information strings from the log file.
-    Returns a dictionary mapping episode numbers to their corresponding log lines.
-    """
-    episode_info = {}
-    with open(log_filename, 'r') as f:
-        lines = f.readlines()
-    for line in lines:
-        if line.startswith('Episode'):
-            # Extract episode number
-            try:
-                episode_part, _ = line.split(':', 1)
-                episode_num = int(episode_part.strip().split(' ')[1])
-                episode_info[episode_num] = line.strip()
-            except (IndexError, ValueError):
-                continue  # Skip malformed lines
-    return episode_info
-
 def plot_trajectory(env, trajectories, episode_info, episode_number):
     """
     Plot the trajectory for a given episode and display the corresponding info string.
     """
     # Setup visualization
     fig, ax = plt.subplots(figsize=(15, 8))
-    plt.subplots_adjust(bottom=0.25)  # Adjust space for widgets and text
+    plt.subplots_adjust(bottom=0.35)  # Adjust space to avoid collision with the slider and text box
 
     ax.set_xlim(0, env.track_length + 50)
     ax.set_ylim(-10, env.track_width + 10)
@@ -92,18 +73,26 @@ def plot_trajectory(env, trajectories, episode_info, episode_number):
     # Plot the trajectory
     line, = ax.plot(x_positions, y_positions, color='blue', linewidth=2, label='Trajectory')
 
-    # Add text box for episode data
-    text_ax = fig.add_axes([0.05, 0.05, 0.9, 0.15])
+    # Add text box for episode data above the slider
+    text_ax = fig.add_axes([0.1, 0.18, 0.8, 0.1])  # Adjust position to be above the slider
     text_ax.axis('off')  # Hide axis
 
     def update_episode_info(episode_num):
         """
         Update the information text displayed on the plot based on the selected episode.
         """
-        info_string = episode_info.get(episode_num, f"No data available for Episode {episode_num}.")
+        entry = next((e for e in episode_info if e['episode'] == episode_num), None)
+        if entry:
+            info_string = (f"Episode {entry['episode']}:\n"
+                           f"Reward: {entry['reward']}\n"
+                           f"Epsilon: {entry['epsilon']}\n"
+                           f"Steps: {entry['steps']}\n"
+                           f"Avg Loss: {entry['avg_loss']:.4f}")
+        else:
+            info_string = f"No data available for Episode {episode_num}."
         text_ax.clear()
         text_ax.text(0.5, 0.5, info_string, horizontalalignment='center',
-                    verticalalignment='center', fontsize=12, wrap=True)
+                     verticalalignment='center', fontsize=12, wrap=True)
         text_ax.axis('off')
         fig.canvas.draw_idle()
 
@@ -111,7 +100,7 @@ def plot_trajectory(env, trajectories, episode_info, episode_number):
     update_episode_info(episode_number)
 
     # Add a slider to select episodes
-    ax_episode = plt.axes([0.2, 0.15, 0.65, 0.03])  # Adjust position for text box
+    ax_episode = plt.axes([0.2, 0.05, 0.65, 0.03])  # Keep slider below the text box
     episode_slider = Slider(
         ax=ax_episode,
         label='Episode',
@@ -170,16 +159,13 @@ if __name__ == '__main__':
     if not trajectories:
         print("No trajectories found. Please run the training script first.")
     else:
-        # Parse the training log file
-        # Assume the log file is named 'training_log_<timestamp>.txt'
-        log_files = [f for f in os.listdir('.') if f.startswith('training_log_') and f.endswith('.txt')]
-        if log_files:
-            log_filename = max(log_files, key=os.path.getctime)  # Get the most recent log file
-            episode_info = load_episode_info(log_filename)
-        else:
-            print("No training log file found.")
-            episode_info = {}
+        # Load structured log data from HDF5
+        hdf5_logger = HDF5Logger("training_logs.hdf5")
+        episode_info = hdf5_logger.load_logs()
 
-        # Start by displaying the first episode
-        initial_episode = 1  # Assuming episodes start at 1
-        plot_trajectory(env, trajectories, episode_info, initial_episode)
+        if not episode_info:
+            print("No structured log data found in HDF5 file.")
+        else:
+            # Start by displaying the first episode
+            initial_episode = 1  # Assuming episodes start at 1
+            plot_trajectory(env, trajectories, episode_info, initial_episode)

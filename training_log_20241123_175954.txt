@@ -1,0 +1,47 @@
+Training Log
+20241123_175954
+-----------
+Configuration: c:\Users\rasmu\OneDrive\Skrivebord\Dev\NN cartrack\config.py
+
+Training Metrics
+---------------
+Configuration Items
+--------------------
+torch: <module 'torch' from 'C:\\Users\\rasmu\\OneDrive\\Skrivebord\\Dev\\NN cartrack\\.venv\\lib\\site-packages\\torch\\__init__.py'>
+np: <module 'numpy' from 'C:\\Users\\rasmu\\OneDrive\\Skrivebord\\Dev\\NN cartrack\\.venv\\lib\\site-packages\\numpy\\__init__.py'>
+DEVICE: cuda
+TRACK_LENGTH: 300
+TRACK_WIDTH: 50
+MAX_TIMESTEPS: 200
+OBSTACLES: [{'center': array([150.,  25.], dtype=float32), 'size': array([50., 30.], dtype=float32)}, {'center': array([225.,  45.], dtype=float32), 'size': array([30., 20.], dtype=float32)}, {'center': array([225.,   5.], dtype=float32), 'size': array([30., 20.], dtype=float32)}]
+LEARNING_RATE: 1e-05
+BATCH_SIZE: 64
+GAMMA: 0.99
+EPS_START: 0.5
+EPS_END: 0.1
+EPS_DECAY: 5000
+TARGET_UPDATE: 10
+MEMORY_CAPACITY: 100000
+NUM_EPISODES: 200
+MAX_SPEED: 5
+ACCELERATION: 1
+STEERING: 0.9
+HIDDEN_LAYERS: [32, 32, 32, 32]
+REWARD_GOAL: 100
+PENALTY_OFF_TRACK: 100
+PENALTY_OBSTACLE: 200
+PENALTY_BORDER: 100
+PENALTY_BACKWARDS: 1
+PENALTY_TIME_LIMIT: 5
+DELTA_X_REWARD_FACTOR: 33.333333333333336
+TIME_PENALTY: 100
+BORDER_THRESHOLD: 0
+OBSTACLE_THRESHOLD: 0
+PENALTY_TERMINATION: 2000
+STATE_SIZE: 12
+ACTION_SIZE: 4
+PROCENTAGE_TO_DRAW: 0.5
+DRAW_BEST_TRAJECTORIES: 101
+
+Training Progress
+-----------------

@@ -24,11 +24,11 @@ BATCH_SIZE = 64
 GAMMA = 0.99  # Increased for better future reward consideration
 EPS_START = 0.5
 EPS_END = 0.1
-EPS_DECAY = 0.999  # Faster decay
+EPS_DECAY = 5000  # Faster decay
 TARGET_UPDATE = 10  # Update target network less frequently
 MEMORY_CAPACITY = 100000
 
-NUM_EPISODES = 2600
+NUM_EPISODES = 500
 
 # Agent parameters
 MAX_SPEED = 5
@@ -42,7 +42,7 @@ REWARD_GOAL = 100  # Positive reward
 
 # Define other values as factors of the REWARD_GOAL
 PENALTY_OFF_TRACK = REWARD_GOAL // 1  # Same as REWARD_GOAL
-PENALTY_OBSTACLE = REWARD_GOAL // 1
+PENALTY_OBSTACLE = REWARD_GOAL * 2
 PENALTY_BORDER = REWARD_GOAL // 1
 PENALTY_BACKWARDS = REWARD_GOAL // 100  # Approximate to a close factor
 PENALTY_TIME_LIMIT = REWARD_GOAL // 20
@@ -50,6 +50,7 @@ DELTA_X_REWARD_FACTOR = REWARD_GOAL / 2  # Adjusted for precision, still a facto
 TIME_PENALTY = REWARD_GOAL // 1  # 
 BORDER_THRESHOLD = REWARD_GOAL // 1000
 OBSTACLE_THRESHOLD = REWARD_GOAL // 1000  
+PENALTY_TERMINATION = REWARD_GOAL *20
 
 
 

@@ -75,20 +75,26 @@ class CarTrackEnv:
         border_penalty = self._calculate_border_penalty()  # Positive value
         obstacle_penalty = self._calculate_obstacle_penalty()  # Positive value
 
-        # Set reward based on conditions
         if reached_goal:
-            reward = config.REWARD_GOAL  # Positive reward
+            reward = config.REWARD_GOAL
             self.done = True
             self.reached_goal = True
         elif off_track:
-            reward = -config.PENALTY_OFF_TRACK  # Negative penalty
+            reward = -config.PENALTY_OFF_TRACK
             self.done = True
         elif self.timestep >= config.MAX_TIMESTEPS:
-            reward = -config.PENALTY_TIME_LIMIT  # Negative penalty
+            reward = -config.PENALTY_TIME_LIMIT
             self.done = True
         else:
-            # Regular reward calculation
-            reward = delta_x_reward - config.TIME_PENALTY - border_penalty - obstacle_penalty  # Subtract penalties
+            reward = (
+                delta_x_reward
+                - config.TIME_PENALTY
+                - border_penalty
+                - obstacle_penalty
+            )
+            if self.done:  # Apply termination penalty for failed episodes
+                reward -= config.PENALTY_TERMINATION
+
 
         # Update previous x-position for the next step calculation
         self.prev_position_x = self.position[0]
