@@ -18,7 +18,7 @@ from env import CarTrackEnv
 from hdf5_logger import HDF5Logger
 
 
-log_entries = []  # Store logs in memory to write at the end
+log_entries: list[dict] = []  # Store logs in memory to write at the end
 
 class DQN(nn.Module):
     def __init__(self, input_size, output_size, hidden_layers):
@@ -188,7 +188,7 @@ def train(env, policy_net, target_net, optimizer, memory):
                     reward += config.REWARD_GOAL
                 else:
                     # Apply a penalty for failing to reach the goal (optional)
-                    reward -= config.PENALTY_TERMINATION
+                    reward -= config.EPISODE_PENALTY_FAILURE
                 break
 
         save_trajectory(episode, trajectory_data)

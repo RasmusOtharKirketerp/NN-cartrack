@@ -41,8 +41,7 @@ def load_trajectories(trajectory_dir='trajectories'):
 
 def plot_all_trajectories(env, trajectories, episode_info, top_n=10, output_file='all_episodes_highlight_top10.png'):
     """
-    Plot all trajectories on a single plot, highlight the top N episodes based on Reward,
-    and annotate their scores.
+    Plot all trajectories with color-coded lines by episode and overlay average reward over the color scale.
 
     Args:
         env (CarTrackEnv): The environment instance containing track and obstacle details.
@@ -51,16 +50,27 @@ def plot_all_trajectories(env, trajectories, episode_info, top_n=10, output_file
         top_n (int): Number of top episodes to highlight.
         output_file (str): Filename for the saved plot.
     """
-    # Initialize the plot
+    # Extract rewards and compute average reward per episode
+    episode_rewards = {entry['episode']: entry['reward'] for entry in episode_info}
+    episodes = np.array(list(episode_rewards.keys()))
+    rewards = np.array(list(episode_rewards.values()))
+
+    # Normalize rewards for plotting inside the colorbar (0 to 1 scale)
+    reward_norm = (rewards - np.min(rewards)) / (np.max(rewards) - np.min(rewards))
+
+    # Normalize episodes for placement along the colorbar
+    x_positions = (episodes - np.min(episodes)) / (np.max(episodes) - np.min(episodes))
+
+    # Initialize the main plot
     fig, ax = plt.subplots(figsize=(20, 10))
-    plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05)
+    plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.2)  # Adjust for colorbar and reward overlay
 
     # Set plot limits based on environment
     ax.set_xlim(0, env.track_length + 50)
     ax.set_ylim(-10, env.track_width + 10)
     ax.set_xlabel('Position X')
     ax.set_ylabel('Position Y')
-    ax.set_title('All Episodes Trajectories with Top 10 Highlights')
+    ax.set_title('All Episodes Trajectories with Average Reward Overlay')
 
     # Draw track boundaries and finish line
     ax.axhline(y=0, color='red', linestyle='--', linewidth=1)
@@ -85,44 +95,39 @@ def plot_all_trajectories(env, trajectories, episode_info, top_n=10, output_file
         ax.add_patch(obstacle_rect)
 
     # Define a color map for trajectories
-    cmap = cm.get_cmap('viridis')
-    norm = Normalize(vmin=1, vmax=len(trajectories))
-    colors = [cmap(norm(i)) for i in range(1, len(trajectories) + 1)]
+    cmap = cm.get_cmap('viridis', len(trajectories))  # Discrete colors for each episode
+    colors = cmap(range(len(trajectories)))
 
-    # Extract Rewards and identify top N episodes
-    episode_rewards = {entry['episode']: entry['reward'] for entry in episode_info}
+    # Create a colorbar to map episode numbers to colors
+    sm = cm.ScalarMappable(cmap=cmap, norm=Normalize(vmin=1, vmax=len(trajectories)))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, orientation='horizontal', pad=0.15)
+    cbar.set_label('Episode Number')
 
-    # Sort episodes by Reward in descending order
+    # Highlight the top N episodes
     sorted_episodes = sorted(episode_rewards.items(), key=lambda x: x[1], reverse=True)
     top_episodes = sorted_episodes[:top_n]
     top_episode_nums = set([ep for ep, rw in top_episodes])
 
-    # Plot each trajectory
     for idx, trajectory in enumerate(trajectories, start=1):
         positions = trajectory['positions']
         x_positions = [pos[0] for pos in positions]
         y_positions = [pos[1] for pos in positions]
 
         if idx in top_episode_nums:
-            # Highlight top episodes with thicker lines and distinct color
-            ax.plot(x_positions, y_positions, color="blue", linewidth=3, alpha=1.0)
-            print(f"Episode {idx} plotted with Reward: {episode_rewards[idx]}")
+            ax.plot(x_positions, y_positions, color=colors[idx - 1], linewidth=2, alpha=1.0, label=f"Ep {idx}")
         else:
-            # Plot other episodes with thinner lines and lower opacity
-            ax.plot(x_positions, y_positions, color=colors[idx - 1], linewidth=1, alpha=0.3)
+            ax.plot(x_positions, y_positions, color=colors[idx - 1], linewidth=1, alpha=0.5, linestyle='solid')
 
-    # Annotate top N episodes with their Rewards
     for ep_num, reward in top_episodes:
         trajectory = trajectories[ep_num - 1]
         positions = trajectory['positions']
-        end_pos = positions[-1]  # Last position for annotation
+        end_pos = positions[-1]
 
-        # Offset the text slightly for better visibility
         text_x = end_pos[0]
         text_y = end_pos[1]
-        
-        reward_print = int(round(reward, 0))  # Round and convert to integer
-        formatted_reward = f"{reward_print:,}"  # Add thousands separator
+        reward_print = int(round(reward, 0))
+        formatted_reward = f"{reward_print:,}"
         ax.text(
             text_x, text_y,
             f'Ep {ep_num}: {formatted_reward}',
@@ -135,8 +140,12 @@ def plot_all_trajectories(env, trajectories, episode_info, top_n=10, output_file
     # Save the plot as a PNG file
     plt.savefig(output_file, bbox_inches='tight', dpi=300)
     plt.show()
-    plt.close(fig)  # Close the figure to free memory
+    plt.close(fig)
     print(f"All episodes have been plotted and saved to '{output_file}'. Top {top_n} episodes highlighted.")
+
+
+
+
 
 def main():
     """
