@@ -16,11 +16,13 @@ class CarTrackEnv:
         self.track_length = config.TRACK_LENGTH
         self.track_width = config.TRACK_WIDTH
         self.obstacles = config.OBSTACLES
+        self.angle = 0.0  # Car's direction in radians
         self.reset()
 
     def reset(self):
         self.position = np.array([0.0, self.track_width / 2.0], dtype=np.float32)
         self.velocity = np.array([0.0, 0.0], dtype=np.float32)
+        self.angle = 0.0  # Reset angle to face straight along the X-axis
         self.done = False
         self.timestep = 0
         self.position_history = [self.position.copy()]
@@ -101,7 +103,14 @@ class CarTrackEnv:
         # Calculate forward progress in the x-direction
         delta_x = self.position[0] - self.prev_position_x
         SCALING_FACTOR = 2  
-        delta_x_reward = config.STEP_REWARD_FORWARD_PROGRESS * math.exp(max(delta_x, 0) / SCALING_FACTOR)
+
+        if delta_x > 0:
+            # Positive forward progress
+            delta_x_reward = config.STEP_REWARD_FORWARD_PROGRESS * math.exp(delta_x / SCALING_FACTOR)
+        else:
+            # Negative backward progress (penalty)
+            delta_x_reward = config.STEP_PENALTY_BACKWARD * abs(delta_x) * -1
+
 
         self.timestep += 1  # Increment timestep
 
@@ -145,7 +154,7 @@ class CarTrackEnv:
             f"  Delta X Reward: {delta_x_reward:.2f}\n"
             f"  Border Penalty: {border_penalty:.2f}\n"
             f"  Obstacle Penalty: {obstacle_penalty:.2f}\n"
-            f"  Total Reward: {reward:.2f}\n"
+            f"  Step Reward until this step: {reward:.2f}\n"
         )
 
         # Update previous x-position for the next step calculation
@@ -166,20 +175,36 @@ class CarTrackEnv:
         return self._get_state(), reward, self.done, info
 
     def _update_velocity(self, action):
-        if action == 0:  # Accelerate
-            self.velocity[0] += config.ACCELERATION
-        elif action == 1:  # Decelerate
-            self.velocity[0] -= config.ACCELERATION
-        elif action == 2:  # Steer left
-            self.velocity[1] -= config.STEERING
-        elif action == 3:  # Steer right
-            self.velocity[1] += config.STEERING
+        speed = np.linalg.norm(self.velocity)
 
+        # Adjust speed based on action
+        if action == 0:  # Accelerate
+            speed += config.ACCELERATION
+        elif action == 1:  # Decelerate
+            speed = max(0, speed - config.ACCELERATION)
+
+        # Adjust angle based on action
+        if action == 2:  # Steer left
+            self.angle += config.STEERING_ANGLE_INCREMENT  # Turn left
+        elif action == 3:  # Steer right
+            self.angle -= config.STEERING_ANGLE_INCREMENT  # Turn right
+
+        # Normalize the angle to stay within [0, 2π]
+        self.angle %= (2 * np.pi)
+
+
+        # Convert speed and angle to velocity components
+        self.velocity[0] = speed * np.cos(self.angle)  # X-component
+        self.velocity[1] = speed * np.sin(self.angle)  # Y-component
+
+        # Log updated velocity and angle
         self._verbose_log(f"Velocity updated: {self.velocity}")
+        self._verbose_log(f"Angle updated: {self.angle:.2f}")
+ 
 
     def _apply_friction_and_cap_speed(self):
-        # Apply friction
-        self.velocity *= 0.95
+        # Apply friction uniformly to the speed
+        self.velocity *= 0.95  # Apply friction to both X and Y components
 
         # Cap the speed at max_speed
         speed = np.linalg.norm(self.velocity)
@@ -187,6 +212,7 @@ class CarTrackEnv:
             self.velocity = (self.velocity / speed) * config.MAX_SPEED
 
         self._verbose_log(f"Speed after friction and cap: {np.linalg.norm(self.velocity):.2f}")
+        self._verbose_log(f"Angle after friction and cap: {self.angle:.2f}")
 
     def _update_position(self):
         # Update the car's position based on velocity
@@ -208,51 +234,23 @@ class CarTrackEnv:
         return off_track
 
     def _calculate_border_penalty(self):
-        distance_to_left_border = self.position[1]
-        distance_to_right_border = self.track_width - self.position[1]
-        min_distance_to_border = min(distance_to_left_border, distance_to_right_border)
-
-        step_penalty_border = 0
-        if min_distance_to_border < config.STEP_THRESHOLD_BORDER:
-            step_penalty_border += (
-                config.STEP_THRESHOLD_BORDER - min_distance_to_border
-            ) * config.STEP_PENALTY_BORDER
-
-        # Penalize backward movement
-        if self.position[0] < self.prev_position_x:
-            step_penalty_border += config.STEP_PENALTY_BORDER
-
-        self._verbose_log(f"Border Penalty: {step_penalty_border:.2f}")
-        return step_penalty_border
+        return 0
 
     def _calculate_obstacle_penalty(self):
-        step_penalty_obstacle = 0
         for obstacle in self.obstacles:
             obstacle_x_min = obstacle["center"][0] - obstacle["size"][0] / 2
             obstacle_x_max = obstacle["center"][0] + obstacle["size"][0] / 2
             obstacle_y_min = obstacle["center"][1] - obstacle["size"][1] / 2
             obstacle_y_max = obstacle["center"][1] + obstacle["size"][1] / 2
 
-            in_obstacle = (
+            # Penalize for collisions
+            if (
                 obstacle_x_min <= self.position[0] <= obstacle_x_max and
                 obstacle_y_min <= self.position[1] <= obstacle_y_max
-            )
-
-            if in_obstacle:
-                step_penalty_obstacle = config.STEP_PENALTY_OBSTACLE  # Immediate penalty
+            ):
                 self.done = True
                 self._log("Collision with obstacle!")
-                break
-            else:
-                # Proximity penalty
-                distance_x = max(0, obstacle_x_min - self.position[0], self.position[0] - obstacle_x_max)
-                distance_y = max(0, obstacle_y_min - self.position[1], self.position[1] - obstacle_y_max)
-                min_distance_to_obstacle = min(distance_x, distance_y)
+                return config.STEP_PENALTY_OBSTACLE  # Only penalize for collision
 
-                if min_distance_to_obstacle < config.STEP_THRESHOLD_OBSTACLE:
-                    step_penalty_obstacle += (
-                        config.STEP_THRESHOLD_OBSTACLE - min_distance_to_obstacle
-                    ) * 50
+        return 0  # No penalty for proximity
 
-        self._verbose_log(f"Obstacle Penalty: {step_penalty_obstacle:.2f}")
-        return step_penalty_obstacle

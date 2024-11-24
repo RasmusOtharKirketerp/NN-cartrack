@@ -19,7 +19,7 @@ OBSTACLES = [
 ]
 
 # DQN parameters
-LEARNING_RATE = 1e-6  # Slightly reduced for stability
+LEARNING_RATE = 1e-4  # Slightly reduced for stability
 BATCH_SIZE = 64
 GAMMA = 0.99  # Increased for better future reward consideration
 EPS_START = 1
@@ -28,41 +28,39 @@ EPS_DECAY = 50000
 TARGET_UPDATE = 10  # Update target network less frequently
 MEMORY_CAPACITY = 100000
 
-NUM_EPISODES = 1000
+NUM_EPISODES = 300
 
 # Agent parameters
-MAX_SPEED = 5
-ACCELERATION = 1
+MAX_SPEED = 2
+ACCELERATION = 0.1
 STEERING = 0.9
-
-#HIDDEN_LAYERS = [4, 4, 4, 4]  # Use a list to preserve order
-HIDDEN_LAYERS = [32, 64, 64, 32]  # Use a list to preserve order
-#HIDDEN_LAYERS = [32, 32, 32]  # Use a list to preserve order
-#HIDDEN_LAYERS = [128, 512, 512, 128]  # Use a list to preserve order
+STEERING_ANGLE_INCREMENT = np.radians(5)  # Steering change per action (5 degrees)
 
 # Episode-Based Rewards and Penalties
 EPISODE_REWARD_GOAL_REACHED = 5000
-EPISODE_PENALTY_OFF_TRACK = 200
+EPISODE_PENALTY_OFF_TRACK = EPISODE_REWARD_GOAL_REACHED * 2
 EPISODE_PENALTY_TIME_LIMIT = 100
 EPISODE_PENALTY_FAILURE = 3000
 
 # Step-Based Rewards and Penalties
-STEP_REWARD_FORWARD_PROGRESS = 150
+STEP_REWARD_FORWARD_PROGRESS = 1500
 STEP_PENALTY_BORDER = 100
-STEP_PENALTY_OBSTACLE = 100
-STEP_PENALTY_TIME = 5
+STEP_PENALTY_BACKWARD = 500
+STEP_PENALTY_OBSTACLE = EPISODE_REWARD_GOAL_REACHED
+STEP_PENALTY_TIME = 1
 
 # Step-Based Thresholds
 STEP_THRESHOLD_BORDER = 1.0
 STEP_THRESHOLD_OBSTACLE = 1.5
 
-# Episode-Based Thresholds
 EPISODE_THRESHOLD_MAX_TIMESTEPS = 1000
 
 # State and action sizes
 STATE_SIZE = 12
 ACTION_SIZE = 4
 
+
+HIDDEN_LAYERS = [32,64,ACTION_SIZE]  # Use a list to preserve order
 # Drawing parameters
 PROCENTAGE_TO_DRAW = 0.5
 DRAW_BEST_TRAJECTORIES = int(NUM_EPISODES * PROCENTAGE_TO_DRAW) + 1
